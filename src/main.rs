@@ -2,6 +2,7 @@ use std::io::Cursor;
 use std::net::Ipv4Addr;
 
 use image::{ImageFormat, Luma};
+use qrcode::render::svg;
 use qrcode::QrCode;
 use rocket::data::ToByteUnit;
 use rocket::form::Form;
@@ -9,18 +10,35 @@ use rocket::http::{Header, Method, RawStr, Status};
 use rocket::route::{Handler, Outcome};
 use rocket::{Config, Data, FromForm, Request, Response, Route};
 
-fn make_qrcode(content: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+enum OutputFormat {
+    PNG,
+    SVG,
+}
+
+fn make_qrcode(content: &str, format: &OutputFormat) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let code = QrCode::new(content)?;
-    let image = code.render::<Luma<u8>>().min_dimensions(1000, 1000).build();
 
     let mut bytes: Vec<u8> = Vec::new();
-    image.write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)?;
+
+    match format {
+        OutputFormat::PNG => {
+            let image = code.render::<Luma<u8>>().min_dimensions(1000, 1000).build();
+            image.write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)?;
+        }
+        OutputFormat::SVG => {
+            bytes = code.render()
+                .dark_color(svg::Color("#000000"))
+                .light_color(svg::Color("#ffffff"))
+                .min_dimensions(1000, 1000)
+                .build().into();
+        }
+    }
 
     Ok(bytes)
 }
 
-fn make_and_return_qrcode<'a>(content: &str) -> Outcome<'a> {
-    let code = make_qrcode(content);
+fn make_and_return_qrcode<'a>(content: &str, format: &OutputFormat) -> Outcome<'a> {
+    let code = make_qrcode(content, format);
 
     let code = match code {
         Ok(code) => code,
@@ -30,12 +48,24 @@ fn make_and_return_qrcode<'a>(content: &str) -> Outcome<'a> {
         }
     };
 
+    let content_type = match format {
+        OutputFormat::PNG => "image/png",
+        OutputFormat::SVG => "image/svg+xml",
+    };
+
     Outcome::Success(
         Response::build()
-            .header(Header::new("Content-Type", "image/png"))
+            .header(Header::new("Content-Type", content_type))
             .sized_body(code.len(), Cursor::new(code))
             .finalize(),
     )
+}
+
+fn get_format_from_accept(req: &'_ Request<'_>) -> OutputFormat {
+    match req.headers().get("Accept").find(|&x| x == "image/svg+xml") {
+        Some(_) => OutputFormat::SVG,
+        None => OutputFormat::PNG,
+    }
 }
 
 #[derive(FromForm)]
@@ -93,7 +123,7 @@ impl Handler for Server {
                     )
                 }
                 Method::Post => match parse_post(req, data).await {
-                    Ok(content) => make_and_return_qrcode(&content),
+                    Ok(content) => make_and_return_qrcode(&content, &get_format_from_accept(req)),
                     Err(_) => Outcome::Error(Status::PayloadTooLarge),
                 },
                 _ => Outcome::Error(Status::MethodNotAllowed),
@@ -103,8 +133,7 @@ impl Handler for Server {
                 Method::Get => {
                     let uri = req.uri().to_string();
                     let uri = uri.strip_prefix("/").unwrap_or(&uri);
-
-                    make_and_return_qrcode(uri)
+                    make_and_return_qrcode(uri, &get_format_from_accept(req))
                 }
                 _ => Outcome::Error(Status::MethodNotAllowed),
             }
