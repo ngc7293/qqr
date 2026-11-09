@@ -2,10 +2,34 @@
 <html>
 <head><title>qqr</title></head>
 <body>
-<form style="display:flex;flex-direction:column;flex;align-items:center;justify-content:center;width:100vw;height:100vh;row-gap:0.25em;"
-      action="" method="post"><textarea name="input" style="width:50vw"></textarea>
-    <label><input type="checkbox" name="rounded"> Bouba</label>
-    <input type="submit"
-           style="width: 25vw"/></form>
+<form id="form" style="display:flex;flex-direction:column;flex;align-items:center;justify-content:center;width:100vw;height:100vh;row-gap:0.25em;" action="" method="post">
+<a id="download" download="qr.png" hidden><img id="result" alt="QR code" style="max-width:50vw;max-height:50vh"></a>
+<textarea name="input" style="width:50vw"></textarea>
+<label><input type="checkbox" name="rounded"> Bouba</label>
+<input type="submit" style="width: 25vw"/>
+</form>
+<script>
+    // Submit via fetch so the image bytes stay in the page; browsers that re-request the
+    // URL on save (e.g. Firefox) would otherwise GET / and save the form instead.
+    const form = document.getElementById("form");
+    const download = document.getElementById("download");
+    const result = document.getElementById("result");
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const response = await fetch("", {method: "POST", body: new URLSearchParams(new FormData(form))});
+        if (!response.ok) {
+            alert("Error: " + response.status + " " + response.statusText);
+            return;
+        }
+        if (download.href) {
+            URL.revokeObjectURL(download.href);
+        }
+        const url = URL.createObjectURL(await response.blob());
+        download.href = url;
+        result.src = url;
+        download.hidden = false;
+    });
+</script>
 </body>
 </html>
